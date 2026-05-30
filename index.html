@@ -669,13 +669,12 @@
 // ==================== 設定區 ====================
 const CLIENT_ID = '1090577082954-4qa1cgufpnahn2u0gfurfjuoaunq70op.apps.googleusercontent.com';
 const SHEET_ID = '1Oqo1kCTIHay8RAJyWAsJucAbmVYST_ekQEGvkAHUmLo';
-const SCOPES = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets';
+const SCOPES = 'https://www.googleapis.com/auth/spreadsheets.readonly';
 
-// Google Drive 的根資料夾 ID（上傳到哪個資料夾）
-// 設定為 'root' 表示根目錄，或填入特定資料夾 ID
-const DRIVE_FOLDER_ID = 'root';
+// Apps Script 後端網址（照片上傳到 ivyphone9024 的 Drive）
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby_oG2RQywPzdNZtGj8fOUuB5d0ni3s8Fz6Uj9A1w3M8XddG1m-kbpLOpIwooIIlDUO/exec';
 
-// Sheet 名稱對應表（照片連結在哪個 sheet）
+// Sheet 名稱對應表
 const SHEET_CONFIGS = [
   { name: '中古iPhone庫存', col: 'V', idCol: 'A' },
   { name: '中古APPLE產品庫存', col: 'V', idCol: 'A' },
@@ -815,7 +814,6 @@ async function findDeviceInSheets(query) {
     const resp = await apiFetch(url);
     const data = await resp.json();
     if (!data.values) continue;
-
     const rows = data.values;
     const headers = rows[0] || [];
 
@@ -951,32 +949,42 @@ async function startUpload() {
   updateProgress(0, '建立 Google Drive 資料夾...');
 
   try {
-    // 1. 建立資料夾
     const folderName = buildFolderName(currentDevice);
-    const folderId = await createDriveFolder(folderName);
-    updateProgress(15, '資料夾已建立，開始上傳照片...');
 
-    // 2. 上傳每張照片
+    // 1. 透過 Apps Script 建立資料夾
+    const folderResp = await appsScriptCall({
+      action: 'createFolder',
+      name: folderName,
+    });
+    if (!folderResp.ok) throw new Error(folderResp.error || '建立資料夾失敗');
+    const folderId = folderResp.folderId;
+    const folderUrl = folderResp.folderUrl;
+
+    updateProgress(15, '資料夾已建立，開始上傳檔案...');
+
+    // 2. 逐一上傳每個檔案
     for (let i = 0; i < selectedFiles.length; i++) {
       const file = selectedFiles[i];
       const pct = 15 + Math.round(((i + 1) / selectedFiles.length) * 70);
-      updateProgress(pct, `上傳第 ${i + 1} / ${selectedFiles.length} 張...`);
-      await uploadFileToDrive(folderId, file, i + 1);
+      const fileType = file.type.startsWith('video/') ? '影片' : '照片';
+      updateProgress(pct, `上傳第 ${i + 1} / ${selectedFiles.length} 個${fileType}...`);
+      await uploadFileViaAppsScript(folderId, file, i + 1);
     }
 
     updateProgress(90, '更新庫存表連結...');
 
-    // 3. 取得資料夾分享連結並設定為任何人可查看
-    const folderUrl = await shareFolderAndGetLink(folderId);
-
-    // 4. 寫回 Google Sheets
-    await updateSheetPhotoUrl(currentDevice, folderUrl);
+    // 3. 透過 Apps Script 寫入庫存表
+    const sheetResp = await appsScriptCall({
+      action: 'updateSheet',
+      sheetName: currentDevice.sheetName,
+      row: currentDevice.rowIndex,
+      col: currentDevice.photoColLetter,
+      url: folderUrl,
+    });
+    if (!sheetResp.ok) throw new Error(sheetResp.error || '寫入庫存表失敗');
 
     updateProgress(100, '完成！');
-
-    setTimeout(() => {
-      showSuccess(folderUrl, folderName);
-    }, 500);
+    setTimeout(() => showSuccess(folderUrl, folderName), 500);
 
   } catch (e) {
     showError('uploadError', '上傳失敗：' + e.message);
@@ -986,101 +994,39 @@ async function startUpload() {
   }
 }
 
-function buildFolderName(device) {
-  // 格式：#5159 12pro 256 藍
-  const parts = [device.id];
-  if (device.model) parts.push(device.model.replace('iPhone', '').trim());
-  if (device.capacity) parts.push(device.capacity);
-  if (device.color) parts.push(device.color);
-  return parts.join(' ');
+async function appsScriptCall(data) {
+  const resp = await fetch(APPS_SCRIPT_URL, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+  const text = await resp.text();
+  try {
+    return JSON.parse(text);
+  } catch(e) {
+    throw new Error('伺服器回應異常：' + text.substring(0, 100));
+  }
 }
 
-async function createDriveFolder(name) {
-  const metadata = {
-    name: name,
-    mimeType: 'application/vnd.google-apps.folder',
-    parents: DRIVE_FOLDER_ID !== 'root' ? [DRIVE_FOLDER_ID] : undefined,
-  };
+async function uploadFileViaAppsScript(folderId, file, index) {
+  // 把檔案轉成 base64
+  const arrayBuffer = await file.arrayBuffer();
+  const uint8 = new Uint8Array(arrayBuffer);
+  let binary = '';
+  for (let i = 0; i < uint8.length; i++) {
+    binary += String.fromCharCode(uint8[i]);
+  }
+  const base64 = btoa(binary);
 
-  const resp = await apiFetch('https://www.googleapis.com/drive/v3/files', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(metadata),
+  const resp = await appsScriptCall({
+    action: 'uploadFile',
+    folderId: folderId,
+    fileName: `${String(index).padStart(2, '0')}_${file.name}`,
+    mimeType: file.type || 'image/jpeg',
+    fileData: base64,
   });
 
-  const data = await resp.json();
-  if (!data.id) throw new Error('建立資料夾失敗：' + JSON.stringify(data));
-  return data.id;
-}
-
-async function uploadFileToDrive(folderId, file, index) {
-  // 使用 multipart upload
-  const metadata = {
-    name: `${String(index).padStart(2, '0')}_${file.name}`,
-    parents: [folderId],
-  };
-
-  const boundary = 'boundary_' + Math.random().toString(36).substr(2);
-  const metaJson = JSON.stringify(metadata);
-
-  const fileBuffer = await file.arrayBuffer();
-
-  // Build multipart body
-  const encoder = new TextEncoder();
-  const metaPart = encoder.encode(
-    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metaJson}\r\n`
-  );
-  const filePart = encoder.encode(
-    `--${boundary}\r\nContent-Type: ${file.type || 'image/jpeg'}\r\n\r\n`
-  );
-  const endPart = encoder.encode(`\r\n--${boundary}--`);
-
-  const body = new Uint8Array(metaPart.length + filePart.length + fileBuffer.byteLength + endPart.length);
-  body.set(metaPart, 0);
-  body.set(filePart, metaPart.length);
-  body.set(new Uint8Array(fileBuffer), metaPart.length + filePart.length);
-  body.set(endPart, metaPart.length + filePart.length + fileBuffer.byteLength);
-
-  const resp = await apiFetch(
-    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
-    {
-      method: 'POST',
-      headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
-      body: body,
-    }
-  );
-
-  const data = await resp.json();
-  if (!data.id) throw new Error('照片上傳失敗');
-  return data.id;
-}
-
-async function shareFolderAndGetLink(folderId) {
-  // 設定資料夾為「知道連結的人可以查看」
-  await apiFetch(`https://www.googleapis.com/drive/v3/files/${folderId}/permissions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ role: 'reader', type: 'anyone' }),
-  });
-
-  return `https://drive.google.com/drive/folders/${folderId}`;
-}
-
-async function updateSheetPhotoUrl(device, url) {
-  const range = `${device.sheetName}!${device.photoColLetter}${device.rowIndex}`;
-  const body = { values: [[url]] };
-
-  const resp = await apiFetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
-    {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }
-  );
-
-  const data = await resp.json();
-  if (data.error) throw new Error('寫入庫存表失敗：' + data.error.message);
+  if (!resp.ok) throw new Error('檔案上傳失敗：' + (resp.error || ''));
+  return resp.fileId;
 }
 
 // ---- UI helpers ----
