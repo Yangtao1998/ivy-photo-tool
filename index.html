@@ -1,0 +1,1123 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>頭張｜商品照片上傳</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap');
+
+  :root {
+    --bg: #0f0f0f;
+    --surface: #1a1a1a;
+    --surface2: #242424;
+    --border: #2e2e2e;
+    --accent: #00e5a0;
+    --accent-dim: rgba(0,229,160,0.12);
+    --accent-dim2: rgba(0,229,160,0.06);
+    --text: #f0f0f0;
+    --text-muted: #888;
+    --text-dim: #555;
+    --danger: #ff4d4d;
+    --warning: #ffaa00;
+    --radius: 14px;
+    --radius-sm: 8px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Noto Sans TC', sans-serif;
+    min-height: 100vh;
+    padding: 0 0 40px;
+  }
+
+  /* Header */
+  .header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .logo {
+    width: 36px; height: 36px;
+    background: var(--accent);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+
+  .header-text h1 {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: 0.02em;
+  }
+
+  .header-text p {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 1px;
+  }
+
+  .auth-status {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .auth-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    transition: background 0.3s;
+  }
+  .auth-dot.connected { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+
+  .auth-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: 'DM Mono', monospace;
+  }
+
+  /* Main content */
+  .container { padding: 20px; max-width: 500px; margin: 0 auto; }
+
+  /* Step indicator */
+  .steps {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 24px;
+  }
+
+  .step {
+    flex: 1;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--border);
+    transition: background 0.3s;
+  }
+  .step.active { background: var(--accent); }
+  .step.done { background: rgba(0,229,160,0.4); }
+
+  /* Cards */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+
+  .card-title {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .card-title::before {
+    content: '';
+    width: 3px; height: 3px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  /* Login section */
+  .login-section { display: none; }
+  .login-section.visible { display: block; }
+
+  .login-btn {
+    width: 100%;
+    padding: 16px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text);
+    font-family: 'Noto Sans TC', sans-serif;
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    transition: all 0.2s;
+  }
+
+  .login-btn:hover, .login-btn:active {
+    background: var(--accent-dim);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .login-btn svg { width: 20px; height: 20px; }
+
+  /* Main tool section */
+  .tool-section { display: none; }
+  .tool-section.visible { display: block; }
+
+  /* Search input */
+  .search-wrap {
+    position: relative;
+    margin-bottom: 16px;
+  }
+
+  .search-prefix {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-family: 'DM Mono', monospace;
+    font-size: 16px;
+    color: var(--accent);
+    font-weight: 500;
+    pointer-events: none;
+  }
+
+  .search-input {
+    width: 100%;
+    padding: 14px 14px 14px 34px;
+    background: var(--surface2);
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 16px;
+    outline: none;
+    transition: border-color 0.2s;
+    -webkit-appearance: none;
+  }
+
+  .search-input:focus { border-color: var(--accent); }
+  .search-input::placeholder { color: var(--text-dim); }
+
+  .search-btn {
+    width: 100%;
+    padding: 14px;
+    background: var(--accent-dim);
+    border: 1.5px solid var(--accent);
+    border-radius: var(--radius-sm);
+    color: var(--accent);
+    font-family: 'Noto Sans TC', sans-serif;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: 0.03em;
+  }
+
+  .search-btn:active { transform: scale(0.98); }
+
+  /* Device info card */
+  .device-info { display: none; }
+  .device-info.visible { display: block; }
+
+  .device-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .device-row:last-child { border-bottom: none; padding-bottom: 0; }
+  .device-row:first-child { padding-top: 0; }
+
+  .device-key {
+    font-size: 12px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .device-val {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text);
+    text-align: right;
+    font-family: 'DM Mono', monospace;
+  }
+
+  .status-badge {
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-weight: 500;
+  }
+
+  .status-在庫 { background: rgba(0,229,160,0.15); color: var(--accent); }
+  .status-COD { background: rgba(255,170,0,0.15); color: var(--warning); }
+  .status-售出 { background: rgba(255,77,77,0.12); color: var(--danger); }
+  .status-default { background: var(--surface2); color: var(--text-muted); }
+
+  /* Photo upload area */
+  .upload-section { display: none; }
+  .upload-section.visible { display: block; }
+
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 32px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .upload-zone:active, .upload-zone.dragover {
+    border-color: var(--accent);
+    background: var(--accent-dim2);
+  }
+
+  .upload-zone input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+    width: 100%;
+    height: 100%;
+  }
+
+  .upload-icon {
+    font-size: 40px;
+    margin-bottom: 10px;
+    display: block;
+  }
+
+  .upload-text {
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+
+  .upload-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  /* Preview grid */
+  .preview-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-top: 16px;
+  }
+
+  .preview-item {
+    aspect-ratio: 1;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    position: relative;
+    background: var(--surface2);
+  }
+
+  .preview-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .preview-item .remove-btn {
+    position: absolute;
+    top: 4px; right: 4px;
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.7);
+    border: none;
+    color: white;
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+  }
+
+  .photo-count {
+    margin-top: 12px;
+    font-size: 13px;
+    color: var(--text-muted);
+    text-align: center;
+  }
+
+  .photo-count span {
+    color: var(--accent);
+    font-weight: 700;
+    font-family: 'DM Mono', monospace;
+  }
+
+  /* Upload button */
+  .upload-btn {
+    width: 100%;
+    padding: 18px;
+    background: var(--accent);
+    border: none;
+    border-radius: var(--radius);
+    color: #000;
+    font-family: 'Noto Sans TC', sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+    transition: all 0.15s;
+    margin-top: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .upload-btn:active { transform: scale(0.98); }
+  .upload-btn:disabled {
+    background: var(--border);
+    color: var(--text-dim);
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  /* Progress */
+  .progress-wrap {
+    display: none;
+    margin-top: 16px;
+  }
+
+  .progress-wrap.visible { display: block; }
+
+  .progress-bar-bg {
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 10px;
+  }
+
+  .progress-bar {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+    width: 0%;
+  }
+
+  .progress-text {
+    font-size: 13px;
+    color: var(--text-muted);
+    text-align: center;
+    font-family: 'DM Mono', monospace;
+  }
+
+  /* Success */
+  .success-card {
+    display: none;
+    background: var(--accent-dim);
+    border: 1px solid rgba(0,229,160,0.3);
+    border-radius: var(--radius);
+    padding: 24px 20px;
+    text-align: center;
+    margin-top: 16px;
+  }
+
+  .success-card.visible { display: block; }
+
+  .success-icon { font-size: 40px; margin-bottom: 10px; }
+
+  .success-title {
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 6px;
+  }
+
+  .success-sub {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 16px;
+    line-height: 1.6;
+  }
+
+  .folder-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 14px;
+  }
+
+  .new-upload-btn {
+    width: 100%;
+    padding: 14px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    font-family: 'Noto Sans TC', sans-serif;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .new-upload-btn:active {
+    background: var(--surface2);
+    color: var(--text);
+  }
+
+  /* Error */
+  .error-msg {
+    display: none;
+    background: rgba(255,77,77,0.1);
+    border: 1px solid rgba(255,77,77,0.3);
+    border-radius: var(--radius-sm);
+    padding: 12px 14px;
+    font-size: 13px;
+    color: var(--danger);
+    margin-top: 12px;
+    line-height: 1.5;
+  }
+
+  .error-msg.visible { display: block; }
+
+  /* Loading spinner */
+  .spinner {
+    width: 18px; height: 18px;
+    border: 2px solid rgba(0,0,0,0.3);
+    border-top-color: #000;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    display: inline-block;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Already has photo warning */
+  .existing-photo-warn {
+    display: none;
+    background: rgba(255,170,0,0.1);
+    border: 1px solid rgba(255,170,0,0.3);
+    border-radius: var(--radius-sm);
+    padding: 12px 14px;
+    font-size: 13px;
+    color: var(--warning);
+    margin-bottom: 14px;
+    line-height: 1.5;
+  }
+
+  .existing-photo-warn.visible { display: block; }
+  .existing-photo-warn a { color: var(--warning); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">📱</div>
+  <div class="header-text">
+    <h1>頭張商品照片</h1>
+    <p>自動上傳 · 自動建檔</p>
+  </div>
+  <div class="auth-status">
+    <div class="auth-dot" id="authDot"></div>
+    <span class="auth-label" id="authLabel">未登入</span>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- Steps -->
+  <div class="steps">
+    <div class="step active" id="step1"></div>
+    <div class="step" id="step2"></div>
+    <div class="step" id="step3"></div>
+  </div>
+
+  <!-- Login -->
+  <div class="login-section visible" id="loginSection">
+    <div class="card">
+      <div class="card-title">登入 Google 帳號</div>
+      <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px; line-height:1.6;">
+        請用 <strong style="color:var(--text)">ivyphone9024@gmail.com</strong> 登入，授權存取 Google Drive 和庫存表。
+      </p>
+      <button class="login-btn" onclick="handleLogin()">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+        </svg>
+        使用 Google 帳號登入
+      </button>
+    </div>
+  </div>
+
+  <!-- Main tool -->
+  <div class="tool-section" id="toolSection">
+
+    <!-- Search -->
+    <div class="card">
+      <div class="card-title">輸入商品編號</div>
+      <div class="search-wrap">
+        <span class="search-prefix">#</span>
+        <input
+          class="search-input"
+          id="searchInput"
+          type="text"
+          placeholder="5159"
+          inputmode="text"
+          autocomplete="off"
+          autocorrect="off"
+          spellcheck="false"
+          onkeydown="if(event.key==='Enter') searchDevice()"
+        />
+      </div>
+      <button class="search-btn" onclick="searchDevice()" id="searchBtn">
+        查詢商品資訊
+      </button>
+      <div class="error-msg" id="searchError"></div>
+    </div>
+
+    <!-- Device info -->
+    <div class="card device-info" id="deviceInfo">
+      <div class="card-title">商品資訊</div>
+      <div id="deviceRows"></div>
+    </div>
+
+    <!-- Upload section -->
+    <div class="upload-section" id="uploadSection">
+      <div class="card">
+        <div class="card-title">選擇照片</div>
+
+        <div class="existing-photo-warn" id="existingWarn">
+          ⚠️ 此商品已有照片連結，上傳後將會覆蓋原有連結。
+        </div>
+
+        <div class="upload-zone" id="uploadZone">
+          <input
+            type="file"
+            id="fileInput"
+            accept="image/*"
+            multiple
+            onchange="handleFiles(this.files)"
+          />
+          <span class="upload-icon">📸</span>
+          <div class="upload-text">點擊選擇照片</div>
+          <div class="upload-hint">可同時選多張 · 支援 JPG / PNG / HEIC</div>
+        </div>
+
+        <div class="preview-grid" id="previewGrid"></div>
+        <div class="photo-count" id="photoCount" style="display:none">
+          已選擇 <span id="photoCountNum">0</span> 張照片
+        </div>
+      </div>
+
+      <button class="upload-btn" id="uploadBtn" onclick="startUpload()" disabled>
+        上傳並建立資料夾
+      </button>
+
+      <!-- Progress -->
+      <div class="progress-wrap" id="progressWrap">
+        <div class="progress-bar-bg">
+          <div class="progress-bar" id="progressBar"></div>
+        </div>
+        <div class="progress-text" id="progressText">準備中...</div>
+      </div>
+
+      <div class="error-msg" id="uploadError"></div>
+    </div>
+
+    <!-- Success -->
+    <div class="success-card" id="successCard">
+      <div class="success-icon">✅</div>
+      <div class="success-title">上傳完成！</div>
+      <div class="success-sub" id="successSub"></div>
+      <br>
+      <a class="folder-link" id="folderLink" href="#" target="_blank">
+        📁 開啟 Google Drive 資料夾
+      </a>
+      <br>
+      <button class="new-upload-btn" onclick="resetAll()">
+        繼續上傳下一支手機
+      </button>
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+// ==================== 設定區 ====================
+const CLIENT_ID = '1090577082954-4qa1cgufpnahn2u0gfurfjuoaunq70op.apps.googleusercontent.com';
+const SHEET_ID = '1Oqo1kCTIHay8RAJyWAsJucAbmVYST_ekQEGvkAHUmLo';
+const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets';
+
+// Google Drive 的根資料夾 ID（上傳到哪個資料夾）
+// 設定為 'root' 表示根目錄，或填入特定資料夾 ID
+const DRIVE_FOLDER_ID = 'root';
+
+// Sheet 名稱對應表（照片連結在哪個 sheet）
+const SHEET_CONFIGS = [
+  { name: '中古iPhone庫存', col: 'V', idCol: 'A' },
+  { name: '中古APPLE產品庫存', col: 'V', idCol: 'A' },
+  { name: '中古Android庫存', col: 'V', idCol: 'A' },
+  { name: '全新機', col: 'T', idCol: 'A' },
+];
+// ==================== 設定區結束 ====================
+
+let tokenClient;
+let accessToken = null;
+let selectedFiles = [];
+let currentDevice = null;
+let currentSheetInfo = null;
+
+// ---- Google Identity Services 初始化 ----
+function initGIS() {
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID,
+    scope: SCOPES,
+    callback: (response) => {
+      if (response.error) {
+        showError('searchError', '登入失敗：' + response.error);
+        return;
+      }
+      accessToken = response.access_token;
+      onLoggedIn();
+    },
+  });
+}
+
+function handleLogin() {
+  if (!tokenClient) {
+    showError('searchError', 'Google 服務尚未載入，請重新整理頁面。');
+    return;
+  }
+  tokenClient.requestAccessToken({ prompt: 'consent' });
+}
+
+function onLoggedIn() {
+  document.getElementById('loginSection').classList.remove('visible');
+  document.getElementById('toolSection').classList.add('visible');
+  document.getElementById('authDot').classList.add('connected');
+  document.getElementById('authLabel').textContent = '已連線';
+  setStep(1);
+}
+
+// ---- 搜尋裝置 ----
+async function searchDevice() {
+  const raw = document.getElementById('searchInput').value.trim();
+  if (!raw) {
+    showError('searchError', '請輸入商品編號');
+    return;
+  }
+
+  // 支援有無 # 前綴
+  const query = raw.startsWith('#') ? raw : '#' + raw;
+
+  const btn = document.getElementById('searchBtn');
+  btn.textContent = '查詢中...';
+  btn.disabled = true;
+  hideError('searchError');
+  hideElement('deviceInfo');
+  hideElement('uploadSection');
+  document.getElementById('successCard').classList.remove('visible');
+
+  try {
+    const result = await findDeviceInSheets(query);
+    if (!result) {
+      showError('searchError', `找不到編號 ${query}，請確認編號是否正確。`);
+      btn.textContent = '查詢商品資訊';
+      btn.disabled = false;
+      return;
+    }
+
+    currentDevice = result;
+    renderDeviceInfo(result);
+    showElement('deviceInfo');
+    showElement('uploadSection');
+    setStep(2);
+
+    // 檢查是否已有照片
+    if (result.photoUrl && result.photoUrl.trim()) {
+      document.getElementById('existingWarn').classList.add('visible');
+    } else {
+      document.getElementById('existingWarn').classList.remove('visible');
+    }
+
+  } catch (e) {
+    showError('searchError', '查詢失敗：' + e.message);
+  }
+
+  btn.textContent = '查詢商品資訊';
+  btn.disabled = false;
+}
+
+async function findDeviceInSheets(query) {
+  for (const config of SHEET_CONFIGS) {
+    const range = `${config.name}!A:V`;
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(range)}`;
+    const resp = await apiFetch(url);
+    const data = await resp.json();
+    if (!data.values) continue;
+
+    const rows = data.values;
+    const headers = rows[0] || [];
+
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      const id = (row[0] || '').toString().trim();
+      if (id.toLowerCase() === query.toLowerCase()) {
+        // 找到！取得各欄位
+        const getCol = (colLetter) => {
+          const idx = colLetter.charCodeAt(0) - 65;
+          return (row[idx] || '').toString().trim();
+        };
+
+        // 找照片欄位索引（V欄 = index 21，T欄 = index 19）
+        const photoColIdx = config.col.charCodeAt(0) - 65;
+        const photoUrl = (row[photoColIdx] || '').toString().trim();
+
+        return {
+          id: id,
+          sheetName: config.name,
+          rowIndex: i + 1, // 1-indexed for Sheets API
+          photoColLetter: config.col,
+          photoUrl: photoUrl,
+          model: getCol('E'),
+          capacity: getCol('F'),
+          color: getCol('G'),
+          battery: getCol('H'),
+          status: getCol('C') || getCol('D'),
+          condition: getCol('J') || getCol('K'),
+        };
+      }
+    }
+  }
+  return null;
+}
+
+function renderDeviceInfo(device) {
+  const statusClass = ['在庫','COD','售出'].includes(device.status)
+    ? 'status-' + device.status : 'status-default';
+
+  const rows = [
+    { key: '編號', val: device.id },
+    { key: '型號', val: device.model || '—' },
+    { key: '容量', val: device.capacity || '—' },
+    { key: '顏色', val: device.color || '—' },
+    { key: '電池', val: device.battery || '—' },
+    { key: '狀態', val: `<span class="status-badge ${statusClass}">${device.status || '—'}</span>` },
+  ];
+
+  document.getElementById('deviceRows').innerHTML = rows.map(r => `
+    <div class="device-row">
+      <span class="device-key">${r.key}</span>
+      <span class="device-val">${r.val}</span>
+    </div>
+  `).join('');
+}
+
+// ---- 照片處理 ----
+function handleFiles(files) {
+  const newFiles = Array.from(files);
+  selectedFiles = [...selectedFiles, ...newFiles];
+  renderPreviews();
+  updateUploadBtn();
+}
+
+function renderPreviews() {
+  const grid = document.getElementById('previewGrid');
+  grid.innerHTML = '';
+
+  selectedFiles.forEach((file, idx) => {
+    const item = document.createElement('div');
+    item.className = 'preview-item';
+
+    const img = document.createElement('img');
+    img.src = URL.createObjectURL(file);
+    item.appendChild(img);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'remove-btn';
+    removeBtn.textContent = '×';
+    removeBtn.onclick = () => {
+      selectedFiles.splice(idx, 1);
+      renderPreviews();
+      updateUploadBtn();
+    };
+    item.appendChild(removeBtn);
+    grid.appendChild(item);
+  });
+
+  const countEl = document.getElementById('photoCount');
+  const countNum = document.getElementById('photoCountNum');
+  if (selectedFiles.length > 0) {
+    countEl.style.display = 'block';
+    countNum.textContent = selectedFiles.length;
+  } else {
+    countEl.style.display = 'none';
+  }
+}
+
+function updateUploadBtn() {
+  document.getElementById('uploadBtn').disabled = selectedFiles.length === 0;
+}
+
+// ---- 上傳流程 ----
+async function startUpload() {
+  if (!currentDevice || selectedFiles.length === 0) return;
+
+  const btn = document.getElementById('uploadBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner"></div> 處理中...';
+
+  hideError('uploadError');
+  showProgress(true);
+  updateProgress(0, '建立 Google Drive 資料夾...');
+
+  try {
+    // 1. 建立資料夾
+    const folderName = buildFolderName(currentDevice);
+    const folderId = await createDriveFolder(folderName);
+    updateProgress(15, '資料夾已建立，開始上傳照片...');
+
+    // 2. 上傳每張照片
+    for (let i = 0; i < selectedFiles.length; i++) {
+      const file = selectedFiles[i];
+      const pct = 15 + Math.round(((i + 1) / selectedFiles.length) * 70);
+      updateProgress(pct, `上傳第 ${i + 1} / ${selectedFiles.length} 張...`);
+      await uploadFileToDrive(folderId, file, i + 1);
+    }
+
+    updateProgress(90, '更新庫存表連結...');
+
+    // 3. 取得資料夾分享連結並設定為任何人可查看
+    const folderUrl = await shareFolderAndGetLink(folderId);
+
+    // 4. 寫回 Google Sheets
+    await updateSheetPhotoUrl(currentDevice, folderUrl);
+
+    updateProgress(100, '完成！');
+
+    setTimeout(() => {
+      showSuccess(folderUrl, folderName);
+    }, 500);
+
+  } catch (e) {
+    showError('uploadError', '上傳失敗：' + e.message);
+    btn.disabled = false;
+    btn.textContent = '上傳並建立資料夾';
+    showProgress(false);
+  }
+}
+
+function buildFolderName(device) {
+  // 格式：#5159 12pro 256 藍
+  const parts = [device.id];
+  if (device.model) parts.push(device.model.replace('iPhone', '').trim());
+  if (device.capacity) parts.push(device.capacity);
+  if (device.color) parts.push(device.color);
+  return parts.join(' ');
+}
+
+async function createDriveFolder(name) {
+  const metadata = {
+    name: name,
+    mimeType: 'application/vnd.google-apps.folder',
+    parents: DRIVE_FOLDER_ID !== 'root' ? [DRIVE_FOLDER_ID] : undefined,
+  };
+
+  const resp = await apiFetch('https://www.googleapis.com/drive/v3/files', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(metadata),
+  });
+
+  const data = await resp.json();
+  if (!data.id) throw new Error('建立資料夾失敗：' + JSON.stringify(data));
+  return data.id;
+}
+
+async function uploadFileToDrive(folderId, file, index) {
+  // 使用 multipart upload
+  const metadata = {
+    name: `${String(index).padStart(2, '0')}_${file.name}`,
+    parents: [folderId],
+  };
+
+  const boundary = 'boundary_' + Math.random().toString(36).substr(2);
+  const metaJson = JSON.stringify(metadata);
+
+  const fileBuffer = await file.arrayBuffer();
+
+  // Build multipart body
+  const encoder = new TextEncoder();
+  const metaPart = encoder.encode(
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metaJson}\r\n`
+  );
+  const filePart = encoder.encode(
+    `--${boundary}\r\nContent-Type: ${file.type || 'image/jpeg'}\r\n\r\n`
+  );
+  const endPart = encoder.encode(`\r\n--${boundary}--`);
+
+  const body = new Uint8Array(metaPart.length + filePart.length + fileBuffer.byteLength + endPart.length);
+  body.set(metaPart, 0);
+  body.set(filePart, metaPart.length);
+  body.set(new Uint8Array(fileBuffer), metaPart.length + filePart.length);
+  body.set(endPart, metaPart.length + filePart.length + fileBuffer.byteLength);
+
+  const resp = await apiFetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+      body: body,
+    }
+  );
+
+  const data = await resp.json();
+  if (!data.id) throw new Error('照片上傳失敗');
+  return data.id;
+}
+
+async function shareFolderAndGetLink(folderId) {
+  // 設定資料夾為「知道連結的人可以查看」
+  await apiFetch(`https://www.googleapis.com/drive/v3/files/${folderId}/permissions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role: 'reader', type: 'anyone' }),
+  });
+
+  return `https://drive.google.com/drive/folders/${folderId}`;
+}
+
+async function updateSheetPhotoUrl(device, url) {
+  const range = `${device.sheetName}!${device.photoColLetter}${device.rowIndex}`;
+  const body = { values: [[url]] };
+
+  const resp = await apiFetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }
+  );
+
+  const data = await resp.json();
+  if (data.error) throw new Error('寫入庫存表失敗：' + data.error.message);
+}
+
+// ---- UI helpers ----
+function showSuccess(folderUrl, folderName) {
+  document.getElementById('uploadSection').style.display = 'none';
+  document.getElementById('deviceInfo').style.display = 'none';
+
+  const successCard = document.getElementById('successCard');
+  successCard.classList.add('visible');
+
+  document.getElementById('successSub').textContent =
+    `已上傳 ${selectedFiles.length} 張照片到「${folderName}」，並自動更新庫存表連結。`;
+
+  document.getElementById('folderLink').href = folderUrl;
+  setStep(3);
+}
+
+function resetAll() {
+  currentDevice = null;
+  selectedFiles = [];
+  document.getElementById('searchInput').value = '';
+  document.getElementById('previewGrid').innerHTML = '';
+  document.getElementById('photoCount').style.display = 'none';
+  document.getElementById('successCard').classList.remove('visible');
+  document.getElementById('uploadSection').classList.remove('visible');
+  document.getElementById('deviceInfo').classList.remove('visible');
+  document.getElementById('uploadSection').style.display = '';
+  document.getElementById('deviceInfo').style.display = '';
+  document.getElementById('uploadBtn').disabled = true;
+  document.getElementById('uploadBtn').textContent = '上傳並建立資料夾';
+  hideError('searchError');
+  hideError('uploadError');
+  showProgress(false);
+  setStep(1);
+}
+
+function showProgress(show) {
+  const el = document.getElementById('progressWrap');
+  if (show) el.classList.add('visible');
+  else el.classList.remove('visible');
+}
+
+function updateProgress(pct, text) {
+  document.getElementById('progressBar').style.width = pct + '%';
+  document.getElementById('progressText').textContent = text;
+}
+
+function showError(id, msg) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.classList.add('visible');
+}
+
+function hideError(id) {
+  document.getElementById(id).classList.remove('visible');
+}
+
+function showElement(id) {
+  document.getElementById(id).classList.add('visible');
+}
+
+function hideElement(id) {
+  document.getElementById(id).classList.remove('visible');
+}
+
+function setStep(n) {
+  for (let i = 1; i <= 3; i++) {
+    const el = document.getElementById('step' + i);
+    el.className = 'step';
+    if (i < n) el.classList.add('done');
+    else if (i === n) el.classList.add('active');
+  }
+}
+
+async function apiFetch(url, options = {}) {
+  const headers = {
+    'Authorization': 'Bearer ' + accessToken,
+    ...(options.headers || {}),
+  };
+  const resp = await fetch(url, { ...options, headers });
+  return resp;
+}
+
+// ---- Init ----
+window.onload = () => {
+  const script = document.createElement('script');
+  script.src = 'https://accounts.google.com/gsi/client';
+  script.onload = initGIS;
+  script.onerror = () => {
+    document.getElementById('authLabel').textContent = '載入失敗';
+  };
+  document.head.appendChild(script);
+};
+</script>
+</body>
+</html>
