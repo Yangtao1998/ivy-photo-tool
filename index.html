@@ -937,6 +937,15 @@ function updateUploadBtn() {
 }
 
 // ---- 上傳流程 ----
+function buildFolderName(device) {
+  // 格式：#5159 12Pro 256GB 藍
+  const parts = [device.id];
+  if (device.model) parts.push(device.model.replace('iPhone', '').trim());
+  if (device.capacity) parts.push(device.capacity);
+  if (device.color) parts.push(device.color);
+  return parts.join(' ');
+}
+
 async function startUpload() {
   if (!currentDevice || selectedFiles.length === 0) return;
 
