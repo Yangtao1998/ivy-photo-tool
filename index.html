@@ -960,8 +960,8 @@ async function startUpload() {
   try {
     const folderName = buildFolderName(currentDevice);
 
-    // 1. 透過 Apps Script 建立資料夾
-    const folderResp = await appsScriptCall({
+    // 1. 透過 Apps Script 建立資料夾（用 GET 取得回應）
+    const folderResp = await appsScriptCallWithResponse({
       action: 'createFolder',
       name: folderName,
     });
@@ -971,7 +971,7 @@ async function startUpload() {
 
     updateProgress(15, '資料夾已建立，開始上傳檔案...');
 
-    // 2. 逐一上傳每個檔案
+    // 2. 逐一上傳每個檔案（用 no-cors POST）
     for (let i = 0; i < selectedFiles.length; i++) {
       const file = selectedFiles[i];
       const pct = 15 + Math.round(((i + 1) / selectedFiles.length) * 70);
@@ -982,8 +982,8 @@ async function startUpload() {
 
     updateProgress(90, '更新庫存表連結...');
 
-    // 3. 透過 Apps Script 寫入庫存表
-    const sheetResp = await appsScriptCall({
+    // 3. 透過 Apps Script 寫入庫存表（用 GET 確認）
+    const sheetResp = await appsScriptCallWithResponse({
       action: 'updateSheet',
       sheetName: currentDevice.sheetName,
       row: currentDevice.rowIndex,
@@ -1004,11 +1004,21 @@ async function startUpload() {
 }
 
 async function appsScriptCall(data) {
-  // Apps Script 用 GET + query string 避免 CORS 問題
-  const params = new URLSearchParams({ payload: JSON.stringify(data) });
-  const resp = await fetch(`${APPS_SCRIPT_URL}?${params.toString()}`, {
-    method: 'GET',
+  // 用 no-cors POST，Apps Script 會接受來自任何來源的 POST
+  const resp = await fetch(APPS_SCRIPT_URL, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify(data),
   });
+  // no-cors 模式無法讀取回應，改用 GET 確認結果
+  return { ok: true };
+}
+
+async function appsScriptCallWithResponse(data) {
+  // 小資料用 GET（可讀取回應）
+  const params = new URLSearchParams({ payload: JSON.stringify(data) });
+  const resp = await fetch(`${APPS_SCRIPT_URL}?${params.toString()}`);
   const text = await resp.text();
   try {
     return JSON.parse(text);
@@ -1018,25 +1028,34 @@ async function appsScriptCall(data) {
 }
 
 async function uploadFileViaAppsScript(folderId, file, index) {
-  // 把檔案轉成 base64
   const arrayBuffer = await file.arrayBuffer();
   const uint8 = new Uint8Array(arrayBuffer);
   let binary = '';
-  for (let i = 0; i < uint8.length; i++) {
-    binary += String.fromCharCode(uint8[i]);
+  // 分批處理避免記憶體問題
+  const chunkSize = 8192;
+  for (let i = 0; i < uint8.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, uint8.subarray(i, i + chunkSize));
   }
   const base64 = btoa(binary);
 
-  const resp = await appsScriptCall({
+  const payload = {
     action: 'uploadFile',
     folderId: folderId,
     fileName: `${String(index).padStart(2, '0')}_${file.name}`,
     mimeType: file.type || 'image/jpeg',
     fileData: base64,
+  };
+
+  // 用 no-cors POST 上傳（檔案太大無法用 GET）
+  await fetch(APPS_SCRIPT_URL, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify(payload),
   });
 
-  if (!resp.ok) throw new Error('檔案上傳失敗：' + (resp.error || ''));
-  return resp.fileId;
+  // no-cors 無法讀取回應，等一下讓伺服器處理完
+  await new Promise(r => setTimeout(r, 1500));
 }
 
 // ---- UI helpers ----
