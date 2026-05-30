@@ -616,18 +616,18 @@
           <input
             type="file"
             id="fileInput"
-            accept="image/*"
+            accept="image/*,video/*"
             multiple
             onchange="handleFiles(this.files)"
           />
           <span class="upload-icon">📸</span>
-          <div class="upload-text">點擊選擇照片</div>
-          <div class="upload-hint">可同時選多張 · 支援 JPG / PNG / HEIC</div>
+          <div class="upload-text">點擊選擇照片或影片</div>
+          <div class="upload-hint">可同時選多張 · 支援 JPG / PNG / HEIC / MP4 / MOV</div>
         </div>
 
         <div class="preview-grid" id="previewGrid"></div>
         <div class="photo-count" id="photoCount" style="display:none">
-          已選擇 <span id="photoCountNum">0</span> 張照片
+          已選擇 <span id="photoCountNum">0</span> 個檔案
         </div>
       </div>
 
@@ -852,9 +852,28 @@ function renderPreviews() {
     const item = document.createElement('div');
     item.className = 'preview-item';
 
-    const img = document.createElement('img');
-    img.src = URL.createObjectURL(file);
-    item.appendChild(img);
+    const isVideo = file.type.startsWith('video/');
+
+    if (isVideo) {
+      // 影片預覽
+      const video = document.createElement('video');
+      video.src = URL.createObjectURL(file);
+      video.style.cssText = 'width:100%;height:100%;object-fit:cover;';
+      video.muted = true;
+      video.playsInline = true;
+      item.appendChild(video);
+
+      // 影片標籤
+      const badge = document.createElement('div');
+      badge.textContent = '🎬';
+      badge.style.cssText = 'position:absolute;bottom:4px;left:4px;font-size:14px;';
+      item.appendChild(badge);
+    } else {
+      // 圖片預覽
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(file);
+      item.appendChild(img);
+    }
 
     const removeBtn = document.createElement('button');
     removeBtn.className = 'remove-btn';
@@ -1035,8 +1054,13 @@ function showSuccess(folderUrl, folderName) {
   const successCard = document.getElementById('successCard');
   successCard.classList.add('visible');
 
+  const photoCount = selectedFiles.filter(f => f.type.startsWith('image/')).length;
+  const videoCount = selectedFiles.filter(f => f.type.startsWith('video/')).length;
+  const parts = [];
+  if (photoCount > 0) parts.push(`${photoCount} 張照片`);
+  if (videoCount > 0) parts.push(`${videoCount} 支影片`);
   document.getElementById('successSub').textContent =
-    `已上傳 ${selectedFiles.length} 張照片到「${folderName}」，並自動更新庫存表連結。`;
+    `已上傳 ${parts.join('、')} 到「${folderName}」，並自動更新庫存表連結。`;
 
   document.getElementById('folderLink').href = folderUrl;
   setStep(3);
