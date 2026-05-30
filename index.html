@@ -690,6 +690,35 @@ let selectedFiles = [];
 let currentDevice = null;
 let currentSheetInfo = null;
 
+// ---- Token 儲存（記住登入狀態）----
+const TOKEN_KEY = 'ivy_access_token';
+const TOKEN_EXPIRY_KEY = 'ivy_token_expiry';
+
+function saveToken(token) {
+  // Token 有效期約 1 小時，我們存 55 分鐘後過期
+  const expiry = Date.now() + 55 * 60 * 1000;
+  try {
+    sessionStorage.setItem(TOKEN_KEY, token);
+    sessionStorage.setItem(TOKEN_EXPIRY_KEY, expiry.toString());
+  } catch(e) {}
+}
+
+function loadSavedToken() {
+  try {
+    const token = sessionStorage.getItem(TOKEN_KEY);
+    const expiry = parseInt(sessionStorage.getItem(TOKEN_EXPIRY_KEY) || '0');
+    if (token && Date.now() < expiry) return token;
+  } catch(e) {}
+  return null;
+}
+
+function clearToken() {
+  try {
+    sessionStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(TOKEN_EXPIRY_KEY);
+  } catch(e) {}
+}
+
 // ---- Google Identity Services 初始化 ----
 function initGIS() {
   tokenClient = google.accounts.oauth2.initTokenClient({
@@ -701,9 +730,17 @@ function initGIS() {
         return;
       }
       accessToken = response.access_token;
+      saveToken(accessToken);
       onLoggedIn();
     },
   });
+
+  // 嘗試用已儲存的 Token 自動登入
+  const savedToken = loadSavedToken();
+  if (savedToken) {
+    accessToken = savedToken;
+    onLoggedIn();
+  }
 }
 
 function handleLogin() {
@@ -711,7 +748,7 @@ function handleLogin() {
     showError('searchError', 'Google 服務尚未載入，請重新整理頁面。');
     return;
   }
-  tokenClient.requestAccessToken({ prompt: 'consent' });
+  tokenClient.requestAccessToken({ prompt: '' });
 }
 
 function onLoggedIn() {
@@ -1129,6 +1166,15 @@ async function apiFetch(url, options = {}) {
     ...(options.headers || {}),
   };
   const resp = await fetch(url, { ...options, headers });
+
+  // Token 過期，自動重新登入
+  if (resp.status === 401) {
+    clearToken();
+    accessToken = null;
+    tokenClient.requestAccessToken({ prompt: '' });
+    throw new Error('登入已過期，請重新授權後再試。');
+  }
+
   return resp;
 }
 
