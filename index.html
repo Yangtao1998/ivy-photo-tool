@@ -1004,15 +1004,16 @@ async function startUpload() {
 }
 
 async function appsScriptCall(data) {
-  const resp = await fetch(APPS_SCRIPT_URL, {
-    method: 'POST',
-    body: JSON.stringify(data),
+  // Apps Script 用 GET + query string 避免 CORS 問題
+  const params = new URLSearchParams({ payload: JSON.stringify(data) });
+  const resp = await fetch(`${APPS_SCRIPT_URL}?${params.toString()}`, {
+    method: 'GET',
   });
   const text = await resp.text();
   try {
     return JSON.parse(text);
   } catch(e) {
-    throw new Error('伺服器回應異常：' + text.substring(0, 100));
+    throw new Error('伺服器回應異常：' + text.substring(0, 200));
   }
 }
 
