@@ -669,7 +669,7 @@
 // ==================== 設定區 ====================
 const CLIENT_ID = '1090577082954-4qa1cgufpnahn2u0gfurfjuoaunq70op.apps.googleusercontent.com';
 const SHEET_ID = '1Oqo1kCTIHay8RAJyWAsJucAbmVYST_ekQEGvkAHUmLo';
-const SCOPES = 'https://www.googleapis.com/auth/spreadsheets.readonly';
+const SCOPES = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets.readonly';
 
 // Apps Script 後端網址（照片上傳到 ivyphone9024 的 Drive）
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby_oG2RQywPzdNZtGj8fOUuB5d0ni3s8Fz6Uj9A1w3M8XddG1m-kbpLOpIwooIIlDUO/exec';
@@ -1028,34 +1028,78 @@ async function appsScriptCallWithResponse(data) {
 }
 
 async function uploadFileViaAppsScript(folderId, file, index) {
-  const arrayBuffer = await file.arrayBuffer();
-  const uint8 = new Uint8Array(arrayBuffer);
-  let binary = '';
-  // 分批處理避免記憶體問題
-  const chunkSize = 8192;
-  for (let i = 0; i < uint8.length; i += chunkSize) {
-    binary += String.fromCharCode.apply(null, uint8.subarray(i, i + chunkSize));
-  }
-  const base64 = btoa(binary);
+  const isVideo = file.type.startsWith('video/');
 
-  const payload = {
-    action: 'uploadFile',
-    folderId: folderId,
-    fileName: `${String(index).padStart(2, '0')}_${file.name}`,
-    mimeType: file.type || 'image/jpeg',
-    fileData: base64,
+  if (isVideo) {
+    // 影片直接走 Google Drive API 上傳
+    await uploadVideoToDrive(folderId, file, index);
+  } else {
+    // 照片走 Apps Script（base64）
+    const arrayBuffer = await file.arrayBuffer();
+    const uint8 = new Uint8Array(arrayBuffer);
+    let binary = '';
+    const chunkSize = 8192;
+    for (let i = 0; i < uint8.length; i += chunkSize) {
+      binary += String.fromCharCode.apply(null, uint8.subarray(i, i + chunkSize));
+    }
+    const base64 = btoa(binary);
+
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({
+        action: 'uploadFile',
+        folderId: folderId,
+        fileName: `${String(index).padStart(2, '0')}_${file.name}`,
+        mimeType: file.type || 'image/jpeg',
+        fileData: base64,
+      }),
+    });
+    await new Promise(r => setTimeout(r, 1500));
+  }
+}
+
+async function uploadVideoToDrive(folderId, file, index) {
+  // 用 Google Drive API 直接上傳影片（支援大檔案）
+  const metadata = {
+    name: `${String(index).padStart(2, '0')}_${file.name}`,
+    parents: [folderId],
   };
 
-  // 用 no-cors POST 上傳（檔案太大無法用 GET）
-  await fetch(APPS_SCRIPT_URL, {
-    method: 'POST',
-    mode: 'no-cors',
-    headers: { 'Content-Type': 'text/plain' },
-    body: JSON.stringify(payload),
-  });
+  const boundary = 'boundary_' + Math.random().toString(36).substr(2);
+  const metaJson = JSON.stringify(metadata);
+  const fileBuffer = await file.arrayBuffer();
 
-  // no-cors 無法讀取回應，等一下讓伺服器處理完
-  await new Promise(r => setTimeout(r, 1500));
+  const encoder = new TextEncoder();
+  const metaPart = encoder.encode(
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metaJson}\r\n`
+  );
+  const filePart = encoder.encode(
+    `--${boundary}\r\nContent-Type: ${file.type || 'video/mp4'}\r\n\r\n`
+  );
+  const endPart = encoder.encode(`\r\n--${boundary}--`);
+
+  const body = new Uint8Array(
+    metaPart.length + filePart.length + fileBuffer.byteLength + endPart.length
+  );
+  body.set(metaPart, 0);
+  body.set(filePart, metaPart.length);
+  body.set(new Uint8Array(fileBuffer), metaPart.length + filePart.length);
+  body.set(endPart, metaPart.length + filePart.length + fileBuffer.byteLength);
+
+  const resp = await apiFetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+      body: body,
+    }
+  );
+
+  const data = await resp.json();
+  if (!data.id) throw new Error('影片上傳失敗：' + JSON.stringify(data));
+  return data.id;
 }
 
 // ---- UI helpers ----
