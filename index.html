@@ -960,18 +960,23 @@ async function startUpload() {
   try {
     const folderName = buildFolderName(currentDevice);
 
-    // 1. 透過 Apps Script 建立資料夾（用 GET 取得回應）
-    const folderResp = await appsScriptCallWithResponse({
-      action: 'createFolder',
-      name: folderName,
+    // 1. 建立資料夾（用 GET 直接取得回應）
+    updateProgress(5, '建立 Google Drive 資料夾...');
+    const params = new URLSearchParams({
+      payload: JSON.stringify({ action: 'createFolder', name: folderName })
     });
-    if (!folderResp.ok) throw new Error(folderResp.error || '建立資料夾失敗');
-    const folderId = folderResp.folderId;
-    const folderUrl = folderResp.folderUrl;
+    const folderResp = await fetch(`${APPS_SCRIPT_URL}?${params.toString()}`);
+    const folderText = await folderResp.text();
+    let folderData;
+    try { folderData = JSON.parse(folderText); }
+    catch(e) { throw new Error('建立資料夾回應異常：' + folderText.substring(0, 100)); }
+    if (!folderData.ok) throw new Error(folderData.error || '建立資料夾失敗');
 
+    const folderId = folderData.folderId;
+    const folderUrl = folderData.folderUrl;
     updateProgress(15, '資料夾已建立，開始上傳檔案...');
 
-    // 2. 逐一上傳每個檔案（用 no-cors POST）
+    // 2. 逐一上傳每個檔案
     for (let i = 0; i < selectedFiles.length; i++) {
       const file = selectedFiles[i];
       const pct = 15 + Math.round(((i + 1) / selectedFiles.length) * 70);
@@ -982,15 +987,22 @@ async function startUpload() {
 
     updateProgress(90, '更新庫存表連結...');
 
-    // 3. 透過 Apps Script 寫入庫存表（用 GET 確認）
-    const sheetResp = await appsScriptCallWithResponse({
-      action: 'updateSheet',
-      sheetName: currentDevice.sheetName,
-      row: currentDevice.rowIndex,
-      col: currentDevice.photoColLetter,
-      url: folderUrl,
+    // 3. 寫入庫存表（用 GET 直接取得回應）
+    const sheetParams = new URLSearchParams({
+      payload: JSON.stringify({
+        action: 'updateSheet',
+        sheetName: currentDevice.sheetName,
+        row: currentDevice.rowIndex,
+        col: currentDevice.photoColLetter,
+        url: folderUrl,
+      })
     });
-    if (!sheetResp.ok) throw new Error(sheetResp.error || '寫入庫存表失敗');
+    const sheetResp = await fetch(`${APPS_SCRIPT_URL}?${sheetParams.toString()}`);
+    const sheetText = await sheetResp.text();
+    let sheetData;
+    try { sheetData = JSON.parse(sheetText); }
+    catch(e) { throw new Error('寫入庫存表回應異常：' + sheetText.substring(0, 100)); }
+    if (!sheetData.ok) throw new Error(sheetData.error || '寫入庫存表失敗');
 
     updateProgress(100, '完成！');
     setTimeout(() => showSuccess(folderUrl, folderName), 500);
@@ -1016,15 +1028,27 @@ async function appsScriptCall(data) {
 }
 
 async function appsScriptCallWithResponse(data) {
-  // 小資料用 GET（可讀取回應）
-  const params = new URLSearchParams({ payload: JSON.stringify(data) });
-  const resp = await fetch(`${APPS_SCRIPT_URL}?${params.toString()}`);
-  const text = await resp.text();
-  try {
-    return JSON.parse(text);
-  } catch(e) {
-    throw new Error('伺服器回應異常：' + text.substring(0, 200));
+  // 先用 no-cors POST 送出請求
+  await fetch(APPS_SCRIPT_URL, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify(data),
+  });
+  // 等伺服器處理完
+  await new Promise(r => setTimeout(r, 2000));
+
+  // 再用 GET 查詢結果
+  if (data.action === 'createFolder') {
+    const params = new URLSearchParams({
+      payload: JSON.stringify({ action: 'getFolder', name: data.name })
+    });
+    const resp = await fetch(`${APPS_SCRIPT_URL}?${params.toString()}`);
+    const text = await resp.text();
+    try { return JSON.parse(text); } catch(e) { throw new Error('回應異常：' + text.substring(0, 200)); }
   }
+
+  return { ok: true };
 }
 
 async function uploadFileViaAppsScript(folderId, file, index) {
