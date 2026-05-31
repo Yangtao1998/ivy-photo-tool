@@ -957,37 +957,49 @@ async function startUpload() {
   showProgress(true);
   updateProgress(0, '建立 Google Drive 資料夾...');
 
+// 庫存照片資料夾 ID（ivyphone9024 的 Drive）
+const INVENTORY_FOLDER_ID = '13e0MkO-qHN2a7fUuuBtcp6qj88Y4LGeM';
+
   try {
     const folderName = buildFolderName(currentDevice);
 
-    // 1. 建立資料夾（用 GET 直接取得回應）
+    // 1. 直接用 Drive API 在「庫存照片」資料夾底下建立子資料夾
     updateProgress(5, '建立 Google Drive 資料夾...');
-    const params = new URLSearchParams({
-      payload: JSON.stringify({ action: 'createFolder', name: folderName })
+    const folderMetadata = {
+      name: folderName,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: [INVENTORY_FOLDER_ID],
+    };
+    const folderResp = await apiFetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(folderMetadata),
     });
-    const folderResp = await fetch(`${APPS_SCRIPT_URL}?${params.toString()}`);
-    const folderText = await folderResp.text();
-    let folderData;
-    try { folderData = JSON.parse(folderText); }
-    catch(e) { throw new Error('建立資料夾回應異常：' + folderText.substring(0, 100)); }
-    if (!folderData.ok) throw new Error(folderData.error || '建立資料夾失敗');
+    const folderData = await folderResp.json();
+    if (!folderData.id) throw new Error('建立資料夾失敗：' + JSON.stringify(folderData));
+    const folderId = folderData.id;
 
-    const folderId = folderData.folderId;
-    const folderUrl = folderData.folderUrl;
+    // 設定資料夾為任何人可查看
+    await apiFetch(`https://www.googleapis.com/drive/v3/files/${folderId}/permissions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'reader', type: 'anyone' }),
+    });
+    const folderUrl = `https://drive.google.com/drive/folders/${folderId}`;
     updateProgress(15, '資料夾已建立，開始上傳檔案...');
 
-    // 2. 逐一上傳每個檔案
+    // 2. 逐一上傳每個檔案（全部用 Drive API）
     for (let i = 0; i < selectedFiles.length; i++) {
       const file = selectedFiles[i];
       const pct = 15 + Math.round(((i + 1) / selectedFiles.length) * 70);
       const fileType = file.type.startsWith('video/') ? '影片' : '照片';
       updateProgress(pct, `上傳第 ${i + 1} / ${selectedFiles.length} 個${fileType}...`);
-      await uploadFileViaAppsScript(folderId, file, i + 1);
+      await uploadFileToDriveAPI(folderId, file, i + 1);
     }
 
     updateProgress(90, '更新庫存表連結...');
 
-    // 3. 寫入庫存表（用 GET 直接取得回應）
+    // 3. 只用 Apps Script 寫入庫存表
     const sheetParams = new URLSearchParams({
       payload: JSON.stringify({
         action: 'updateSheet',
@@ -1001,7 +1013,7 @@ async function startUpload() {
     const sheetText = await sheetResp.text();
     let sheetData;
     try { sheetData = JSON.parse(sheetText); }
-    catch(e) { throw new Error('寫入庫存表回應異常：' + sheetText.substring(0, 100)); }
+    catch(e) { throw new Error('寫入庫存表回應異常'); }
     if (!sheetData.ok) throw new Error(sheetData.error || '寫入庫存表失敗');
 
     updateProgress(100, '完成！');
@@ -1051,41 +1063,7 @@ async function appsScriptCallWithResponse(data) {
   return { ok: true };
 }
 
-async function uploadFileViaAppsScript(folderId, file, index) {
-  const isVideo = file.type.startsWith('video/');
-
-  if (isVideo) {
-    // 影片直接走 Google Drive API 上傳
-    await uploadVideoToDrive(folderId, file, index);
-  } else {
-    // 照片走 Apps Script（base64）
-    const arrayBuffer = await file.arrayBuffer();
-    const uint8 = new Uint8Array(arrayBuffer);
-    let binary = '';
-    const chunkSize = 8192;
-    for (let i = 0; i < uint8.length; i += chunkSize) {
-      binary += String.fromCharCode.apply(null, uint8.subarray(i, i + chunkSize));
-    }
-    const base64 = btoa(binary);
-
-    await fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({
-        action: 'uploadFile',
-        folderId: folderId,
-        fileName: `${String(index).padStart(2, '0')}_${file.name}`,
-        mimeType: file.type || 'image/jpeg',
-        fileData: base64,
-      }),
-    });
-    await new Promise(r => setTimeout(r, 1500));
-  }
-}
-
-async function uploadVideoToDrive(folderId, file, index) {
-  // 用 Google Drive API 直接上傳影片（支援大檔案）
+async function uploadFileToDriveAPI(folderId, file, index) {
   const metadata = {
     name: `${String(index).padStart(2, '0')}_${file.name}`,
     parents: [folderId],
@@ -1100,7 +1078,7 @@ async function uploadVideoToDrive(folderId, file, index) {
     `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metaJson}\r\n`
   );
   const filePart = encoder.encode(
-    `--${boundary}\r\nContent-Type: ${file.type || 'video/mp4'}\r\n\r\n`
+    `--${boundary}\r\nContent-Type: ${file.type || 'application/octet-stream'}\r\n\r\n`
   );
   const endPart = encoder.encode(`\r\n--${boundary}--`);
 
@@ -1122,7 +1100,7 @@ async function uploadVideoToDrive(folderId, file, index) {
   );
 
   const data = await resp.json();
-  if (!data.id) throw new Error('影片上傳失敗：' + JSON.stringify(data));
+  if (!data.id) throw new Error('上傳失敗：' + JSON.stringify(data));
   return data.id;
 }
 
