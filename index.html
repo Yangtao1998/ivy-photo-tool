@@ -622,7 +622,7 @@
           />
           <span class="upload-icon">📸</span>
           <div class="upload-text">點擊選擇照片或影片</div>
-          <div class="upload-hint">可同時選多張 · 支援 JPG / PNG / HEIC / MP4 / MOV</div>
+          <div class="upload-hint">可同時選多張 · 照片自動壓縮加速 · 影片原檔上傳</div>
         </div>
 
         <div class="preview-grid" id="previewGrid"></div>
@@ -679,7 +679,7 @@ const SHEET_CONFIGS = [
   { name: '中古iPhone庫存', col: 'V', idCol: 'A' },
   { name: '中古APPLE產品庫存', col: 'V', idCol: 'A' },
   { name: '中古Android庫存', col: 'V', idCol: 'A' },
-  { name: '全新機', col: 'T', idCol: 'A' },
+  { name: '全新機', col: 'U', idCol: 'A' },
 ];
 // ==================== 設定區結束 ====================
 
@@ -986,16 +986,10 @@ const INVENTORY_FOLDER_ID = '13e0MkO-qHN2a7fUuuBtcp6qj88Y4LGeM';
       body: JSON.stringify({ role: 'reader', type: 'anyone' }),
     });
     const folderUrl = `https://drive.google.com/drive/folders/${folderId}`;
-    updateProgress(15, '資料夾已建立，開始上傳檔案...');
+    updateProgress(15, '壓縮並平行上傳中...');
 
-    // 2. 逐一上傳每個檔案（全部用 Drive API）
-    for (let i = 0; i < selectedFiles.length; i++) {
-      const file = selectedFiles[i];
-      const pct = 15 + Math.round(((i + 1) / selectedFiles.length) * 70);
-      const fileType = file.type.startsWith('video/') ? '影片' : '照片';
-      updateProgress(pct, `上傳第 ${i + 1} / ${selectedFiles.length} 個${fileType}...`);
-      await uploadFileToDriveAPI(folderId, file, i + 1);
-    }
+    // 2. 平行上傳（照片自動壓縮）
+    await uploadAllFiles(folderId, selectedFiles);
 
     updateProgress(90, '更新庫存表連結...');
 
@@ -1003,6 +997,7 @@ const INVENTORY_FOLDER_ID = '13e0MkO-qHN2a7fUuuBtcp6qj88Y4LGeM';
     const sheetParams = new URLSearchParams({
       payload: JSON.stringify({
         action: 'updateSheet',
+        id: currentDevice.id,
         sheetName: currentDevice.sheetName,
         row: currentDevice.rowIndex,
         col: currentDevice.photoColLetter,
@@ -1063,9 +1058,77 @@ async function appsScriptCallWithResponse(data) {
   return { ok: true };
 }
 
-async function uploadFileToDriveAPI(folderId, file, index) {
+// ===== 加速上傳：照片壓縮 + 平行上傳 =====
+const PARALLEL_UPLOADS = 4;   // 同時上傳幾個檔案
+const MAX_EDGE = 1920;        // 照片長邊上限（像素）
+const JPEG_QUALITY = 0.85;    // 壓縮品質
+
+// 把照片縮圖＋壓縮成 JPEG，失敗就回傳原檔
+async function compressImage(file) {
+  if (!file.type.startsWith('image/')) return { blob: file, name: file.name };
+  try {
+    const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+    const w = Math.round(bitmap.width * scale);
+    const h = Math.round(bitmap.height * scale);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close && bitmap.close();
+
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', JPEG_QUALITY));
+    canvas.width = canvas.height = 0;
+
+    if (!blob || blob.size >= file.size) return { blob: file, name: file.name };
+    const name = file.name.replace(/\.[^.]+$/, '') + '.jpg';
+    return { blob: blob, name: name };
+  } catch (e) {
+    return { blob: file, name: file.name };
+  }
+}
+
+// 用工作池平行處理所有檔案
+async function uploadAllFiles(folderId, files) {
+  let cursor = 0;
+  let done = 0;
+  const total = files.length;
+
+  async function worker() {
+    while (cursor < total) {
+      const i = cursor++;
+      const file = files[i];
+      const { blob, name } = await compressImage(file);
+
+      let lastErr;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          await uploadFileToDriveAPI(folderId, blob, i + 1, name);
+          lastErr = null;
+          break;
+        } catch (e) {
+          lastErr = e;
+          await new Promise(r => setTimeout(r, 800));
+        }
+      }
+      if (lastErr) throw lastErr;
+
+      done++;
+      const pct = 15 + Math.round((done / total) * 70);
+      updateProgress(pct, `已上傳 ${done} / ${total} 個檔案...`);
+    }
+  }
+
+  const workers = [];
+  for (let k = 0; k < Math.min(PARALLEL_UPLOADS, total); k++) workers.push(worker());
+  await Promise.all(workers);
+}
+
+async function uploadFileToDriveAPI(folderId, file, index, overrideName) {
   const metadata = {
-    name: `${String(index).padStart(2, '0')}_${file.name}`,
+    name: `${String(index).padStart(2, '0')}_${overrideName || file.name}`,
     parents: [folderId],
   };
 
