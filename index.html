@@ -937,6 +937,32 @@ function updateUploadBtn() {
 }
 
 // ---- 上傳流程 ----
+// 寫入前即時定位：用編號找列、用「照片」標題找欄（不受排序、插列、加欄影響）
+function colToLetter(n) {
+  let s = '';
+  while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
+  return s;
+}
+
+async function locateFresh(device) {
+  const order = [device.sheetName].concat(SHEET_CONFIGS.map(c => c.name).filter(n => n !== device.sheetName));
+  const target = String(device.id).trim().toLowerCase();
+  for (const name of order) {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(name + '!A:AZ')}`;
+    const data = await (await apiFetch(url)).json();
+    const rows = data.values || [];
+    if (!rows.length) continue;
+    const photoIdx = rows[0].findIndex(h => String(h).trim() === '照片');
+    if (photoIdx < 0) continue;
+    for (let i = 1; i < rows.length; i++) {
+      if (String(rows[i][0] || '').trim().toLowerCase() === target) {
+        return { sheetName: name, row: i + 1, col: colToLetter(photoIdx + 1), currentUrl: String(rows[i][photoIdx] || '').trim() };
+      }
+    }
+  }
+  throw new Error('庫存表找不到編號 ' + device.id + '（可能已售出移到銷售明細），照片已上傳但未寫入連結');
+}
+
 function buildFolderName(device) {
   // 格式：#5159 12Pro 256GB 藍
   const parts = [device.id];
@@ -991,25 +1017,37 @@ const INVENTORY_FOLDER_ID = '13e0MkO-qHN2a7fUuuBtcp6qj88Y4LGeM';
     // 2. 平行上傳（照片自動壓縮）
     await uploadAllFiles(folderId, selectedFiles);
 
-    updateProgress(90, '更新庫存表連結...');
 
-    // 3. 只用 Apps Script 寫入庫存表
-    const sheetParams = new URLSearchParams({
-      payload: JSON.stringify({
-        action: 'updateSheet',
-        id: currentDevice.id,
-        sheetName: currentDevice.sheetName,
-        row: currentDevice.rowIndex,
-        col: currentDevice.photoColLetter,
-        url: folderUrl,
-      })
-    });
-    const sheetResp = await fetch(`${APPS_SCRIPT_URL}?${sheetParams.toString()}`);
-    const sheetText = await sheetResp.text();
-    let sheetData;
-    try { sheetData = JSON.parse(sheetText); }
-    catch(e) { throw new Error('寫入庫存表回應異常'); }
-    if (!sheetData.ok) throw new Error(sheetData.error || '寫入庫存表失敗');
+    // 3. 寫入庫存表：每次寫入前重新定位列與欄，寫完讀回確認，失敗自動重試
+    updateProgress(90, '更新庫存表連結...');
+    let linked = false;
+    for (let attempt = 0; attempt < 3 && !linked; attempt++) {
+      const fresh = await locateFresh(currentDevice);
+      const sheetParams = new URLSearchParams({
+        payload: JSON.stringify({
+          action: 'updateSheet',
+          id: currentDevice.id,
+          sheetName: fresh.sheetName,
+          row: fresh.row,
+          col: fresh.col,
+          url: folderUrl,
+        })
+      });
+      const sheetResp = await fetch(`${APPS_SCRIPT_URL}?${sheetParams.toString()}`);
+      const sheetText = await sheetResp.text();
+      let sheetData;
+      try { sheetData = JSON.parse(sheetText); }
+      catch(e) { throw new Error('寫入庫存表回應異常'); }
+      if (!sheetData.ok) throw new Error(sheetData.error || '寫入庫存表失敗');
+
+      updateProgress(95, '確認庫存表連結...');
+      const check = await locateFresh(currentDevice);
+      if (check.currentUrl === folderUrl) linked = true;
+      else await new Promise(r => setTimeout(r, 1500));
+    }
+    if (!linked) {
+      throw new Error('照片已上傳，但庫存表連結沒有寫進 ' + currentDevice.id + '。請手動貼到照片欄：' + folderUrl);
+    }
 
     updateProgress(100, '完成！');
     setTimeout(() => showSuccess(folderUrl, folderName), 500);
