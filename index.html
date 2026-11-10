@@ -684,7 +684,6 @@ const SHEET_CONFIGS = [
 ];
 // ==================== 設定區結束 ====================
 
-let tokenClient;
 let accessToken = null;
 let selectedFiles = [];
 let currentDevice = null;
@@ -695,22 +694,21 @@ const TOKEN_KEY = 'ivy_access_token';
 const TOKEN_EXPIRY_KEY = 'ivy_token_expiry';
 
 let tokenExpiry = 0;
-let pendingToken = null;
 
 function saveToken(token, expiresInSec) {
   // 依 Google 回傳的有效秒數記錄到期時間（提早 1 分鐘視為過期）
   const expiry = Date.now() + ((expiresInSec || 3600) - 60) * 1000;
   tokenExpiry = expiry;
   try {
-    sessionStorage.setItem(TOKEN_KEY, token);
-    sessionStorage.setItem(TOKEN_EXPIRY_KEY, expiry.toString());
+    authStore().setItem(TOKEN_KEY, token);
+    authStore().setItem(TOKEN_EXPIRY_KEY, expiry.toString());
   } catch(e) {}
 }
 
 function loadSavedToken() {
   try {
-    const token = sessionStorage.getItem(TOKEN_KEY);
-    const expiry = parseInt(sessionStorage.getItem(TOKEN_EXPIRY_KEY) || '0');
+    const token = authStore().getItem(TOKEN_KEY);
+    const expiry = parseInt(authStore().getItem(TOKEN_EXPIRY_KEY) || '0');
     if (token && Date.now() < expiry) { tokenExpiry = expiry; return token; }
   } catch(e) {}
   return null;
@@ -718,61 +716,98 @@ function loadSavedToken() {
 
 function clearToken() {
   try {
-    sessionStorage.removeItem(TOKEN_KEY);
-    sessionStorage.removeItem(TOKEN_EXPIRY_KEY);
+    authStore().removeItem(TOKEN_KEY);
+    authStore().removeItem(TOKEN_EXPIRY_KEY);
   } catch(e) {}
 }
 
-// ---- Google Identity Services 初始化 ----
-function initGIS() {
-  tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: CLIENT_ID,
-    scope: SCOPES,
-    callback: (response) => {
-      const p = pendingToken; pendingToken = null;
-      if (response.error) {
-        showError('searchError', '登入失敗：' + response.error);
-        if (p) p.reject(new Error('登入失敗，請再按一次'));
-        return;
-      }
-      accessToken = response.access_token;
-      saveToken(accessToken, Number(response.expires_in));
-      onLoggedIn();
-      if (p) p.resolve();
-    },
-    error_callback: () => {
-      const p = pendingToken; pendingToken = null;
-      if (p) p.reject(new Error('登入視窗被關閉，請再按一次'));
-    },
-  });
+// ---- Google 登入（整頁跳轉，iPhone 主畫面 App 也能用）----
+// 不用彈出視窗：主畫面 App 開的彈窗會跑到 Safari，回不來就出現 400
+const REDIRECT_URI = 'https://yangtao1998.github.io/ivy-photo-tool/';
+const STATE_KEY = 'ivy_oauth_state';
+const RESUME_KEY = 'ivy_resume_id';
 
-  // 嘗試用已儲存的 Token 自動登入
-  const savedToken = loadSavedToken();
-  if (savedToken) {
-    accessToken = savedToken;
-    onLoggedIn();
+function authStore() {
+  try { localStorage.setItem('__t', '1'); localStorage.removeItem('__t'); return localStorage; }
+  catch (e) { return sessionStorage; }
+}
+
+function startRedirectLogin(resumeId) {
+  const state = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  try {
+    authStore().setItem(STATE_KEY, state);
+    if (resumeId) authStore().setItem(RESUME_KEY, resumeId);
+    else authStore().removeItem(RESUME_KEY);
+  } catch (e) {}
+  const params = new URLSearchParams({
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    response_type: 'token',
+    scope: SCOPES,
+    include_granted_scopes: 'true',
+    state: state,
+  });
+  const url = 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
+  // 若被嵌在別的頁面裡，改成整個視窗跳轉
+  try {
+    if (window.top !== window.self) { window.top.location.href = url; return; }
+  } catch (e) {
+    window.open(url, '_blank');
+    return;
+  }
+  window.location.href = url;
+}
+
+// 從 Google 跳回來時，網址 # 後面會帶著憑證
+function handleRedirectReturn() {
+  const hash = window.location.hash.replace(/^#/, '');
+  if (!hash) return false;
+  const p = new URLSearchParams(hash);
+  if (!p.get('access_token') && !p.get('error')) return false;
+  history.replaceState(null, '', window.location.pathname + window.location.search);
+
+  let expectedState = null;
+  try { expectedState = authStore().getItem(STATE_KEY); authStore().removeItem(STATE_KEY); } catch (e) {}
+
+  if (p.get('error')) {
+    showError('loginError', p.get('error') === 'access_denied' ? '已取消登入，請再按一次登入' : '登入失敗：' + p.get('error'));
+    return false;
+  }
+  if (expectedState && p.get('state') !== expectedState) {
+    showError('loginError', '登入驗證不一致，請再按一次登入');
+    return false;
+  }
+  accessToken = p.get('access_token');
+  saveToken(accessToken, Number(p.get('expires_in')));
+  return true;
+}
+
+function initAuth() {
+  const fromRedirect = handleRedirectReturn();
+  if (!fromRedirect) {
+    const savedToken = loadSavedToken();
+    if (savedToken) accessToken = savedToken;
+  }
+  if (!accessToken) return;
+  onLoggedIn();
+
+  // 登入前正在查的編號：自動接著查
+  let resume = null;
+  try { resume = authStore().getItem(RESUME_KEY); authStore().removeItem(RESUME_KEY); } catch (e) {}
+  if (fromRedirect && resume) {
+    document.getElementById('searchInput').value = resume;
+    searchDevice();
   }
 }
 
 function handleLogin() {
-  if (!tokenClient) {
-    showError('searchError', 'Google 服務尚未載入，請重新整理頁面。');
-    return;
-  }
   hideError('loginError');
-  ensureFreshToken(true).catch(e => showError('loginError', e.message));
+  startRedirectLogin(null);
 }
 
-// 只在使用者按按鈕的當下呼叫：憑證剩不到 20 分鐘就先換新，
-// 確保接下來的上傳不會中途過期；同一時間只會開一個登入視窗
-function ensureFreshToken(force) {
-  if (!force && accessToken && Date.now() < tokenExpiry - 20 * 60 * 1000) return Promise.resolve();
-  if (pendingToken) return pendingToken.promise;
-  let resolve, reject;
-  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
-  pendingToken = { promise, resolve, reject };
-  tokenClient.requestAccessToken({ prompt: '' });
-  return promise;
+// 剩餘有效時間（分鐘）
+function tokenMinutesLeft() {
+  return accessToken ? (tokenExpiry - Date.now()) / 60000 : -1;
 }
 
 function onLoggedOut() {
@@ -801,8 +836,8 @@ async function searchDevice() {
     showError('searchError', '請輸入商品編號');
     return;
   }
-  try { await ensureFreshToken(); }
-  catch (e) { showError('searchError', e.message); return; }
+  // 憑證剩不到 30 分鐘：先換新（會跳到 Google 再自動回來接著查這個編號）
+  if (tokenMinutesLeft() < 30) { startRedirectLogin(raw); return; }
 
   // 支援有無 # 前綴
   const query = raw.startsWith('#') ? raw : '#' + raw;
@@ -1012,8 +1047,11 @@ function buildFolderName(device) {
 
 async function startUpload() {
   if (!currentDevice || selectedFiles.length === 0) return;
-  try { await ensureFreshToken(); }
-  catch (e) { showError('uploadError', e.message); return; }
+  if (tokenMinutesLeft() < 2) {
+    onLoggedOut();
+    showError('loginError', '登入已過期，請重新登入，再重新查詢並選照片上傳這支手機。');
+    return;
+  }
 
   const btn = document.getElementById('uploadBtn');
   btn.disabled = true;
@@ -1343,15 +1381,7 @@ async function apiFetch(url, options = {}) {
 }
 
 // ---- Init ----
-window.onload = () => {
-  const script = document.createElement('script');
-  script.src = 'https://accounts.google.com/gsi/client';
-  script.onload = initGIS;
-  script.onerror = () => {
-    document.getElementById('authLabel').textContent = '載入失敗';
-  };
-  document.head.appendChild(script);
-};
+window.onload = initAuth;
 </script>
 </body>
 </html>
