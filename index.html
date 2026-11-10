@@ -557,7 +557,7 @@
     <div class="card">
       <div class="card-title">登入 Google 帳號</div>
       <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px; line-height:1.6;">
-        請用 <strong style="color:var(--text)">ivyphone9024@gmail.com</strong> 登入，授權存取 Google Drive 和庫存表。
+        用你自己的 Gmail 登入即可，照片會統一存到公司的「庫存照片」資料夾。
       </p>
       <button class="login-btn" onclick="handleLogin()">
         <svg viewBox="0 0 24 24" fill="none">
@@ -568,6 +568,7 @@
         </svg>
         使用 Google 帳號登入
       </button>
+      <div class="error-msg" id="loginError"></div>
     </div>
   </div>
 
@@ -693,9 +694,13 @@ let currentSheetInfo = null;
 const TOKEN_KEY = 'ivy_access_token';
 const TOKEN_EXPIRY_KEY = 'ivy_token_expiry';
 
-function saveToken(token) {
-  // Token 有效期約 1 小時，我們存 55 分鐘後過期
-  const expiry = Date.now() + 55 * 60 * 1000;
+let tokenExpiry = 0;
+let pendingToken = null;
+
+function saveToken(token, expiresInSec) {
+  // 依 Google 回傳的有效秒數記錄到期時間（提早 1 分鐘視為過期）
+  const expiry = Date.now() + ((expiresInSec || 3600) - 60) * 1000;
+  tokenExpiry = expiry;
   try {
     sessionStorage.setItem(TOKEN_KEY, token);
     sessionStorage.setItem(TOKEN_EXPIRY_KEY, expiry.toString());
@@ -706,7 +711,7 @@ function loadSavedToken() {
   try {
     const token = sessionStorage.getItem(TOKEN_KEY);
     const expiry = parseInt(sessionStorage.getItem(TOKEN_EXPIRY_KEY) || '0');
-    if (token && Date.now() < expiry) return token;
+    if (token && Date.now() < expiry) { tokenExpiry = expiry; return token; }
   } catch(e) {}
   return null;
 }
@@ -724,13 +729,20 @@ function initGIS() {
     client_id: CLIENT_ID,
     scope: SCOPES,
     callback: (response) => {
+      const p = pendingToken; pendingToken = null;
       if (response.error) {
         showError('searchError', '登入失敗：' + response.error);
+        if (p) p.reject(new Error('登入失敗，請再按一次'));
         return;
       }
       accessToken = response.access_token;
-      saveToken(accessToken);
+      saveToken(accessToken, Number(response.expires_in));
       onLoggedIn();
+      if (p) p.resolve();
+    },
+    error_callback: () => {
+      const p = pendingToken; pendingToken = null;
+      if (p) p.reject(new Error('登入視窗被關閉，請再按一次'));
     },
   });
 
@@ -747,10 +759,34 @@ function handleLogin() {
     showError('searchError', 'Google 服務尚未載入，請重新整理頁面。');
     return;
   }
+  hideError('loginError');
+  ensureFreshToken(true).catch(e => showError('loginError', e.message));
+}
+
+// 只在使用者按按鈕的當下呼叫：憑證剩不到 20 分鐘就先換新，
+// 確保接下來的上傳不會中途過期；同一時間只會開一個登入視窗
+function ensureFreshToken(force) {
+  if (!force && accessToken && Date.now() < tokenExpiry - 20 * 60 * 1000) return Promise.resolve();
+  if (pendingToken) return pendingToken.promise;
+  let resolve, reject;
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  pendingToken = { promise, resolve, reject };
   tokenClient.requestAccessToken({ prompt: '' });
+  return promise;
+}
+
+function onLoggedOut() {
+  clearToken();
+  accessToken = null;
+  tokenExpiry = 0;
+  document.getElementById('toolSection').classList.remove('visible');
+  document.getElementById('loginSection').classList.add('visible');
+  document.getElementById('authDot').classList.remove('connected');
+  document.getElementById('authLabel').textContent = '未登入';
 }
 
 function onLoggedIn() {
+  hideError('loginError');
   document.getElementById('loginSection').classList.remove('visible');
   document.getElementById('toolSection').classList.add('visible');
   document.getElementById('authDot').classList.add('connected');
@@ -765,6 +801,8 @@ async function searchDevice() {
     showError('searchError', '請輸入商品編號');
     return;
   }
+  try { await ensureFreshToken(); }
+  catch (e) { showError('searchError', e.message); return; }
 
   // 支援有無 # 前綴
   const query = raw.startsWith('#') ? raw : '#' + raw;
@@ -974,6 +1012,8 @@ function buildFolderName(device) {
 
 async function startUpload() {
   if (!currentDevice || selectedFiles.length === 0) return;
+  try { await ensureFreshToken(); }
+  catch (e) { showError('uploadError', e.message); return; }
 
   const btn = document.getElementById('uploadBtn');
   btn.disabled = true;
@@ -1289,12 +1329,14 @@ async function apiFetch(url, options = {}) {
   };
   const resp = await fetch(url, { ...options, headers });
 
-  // Token 過期，自動重新登入
+  // 憑證失效：不在背景自動跳登入視窗（iPhone 會出現 400 錯誤頁），
+  // 改成請使用者按「重新登入」
   if (resp.status === 401) {
-    clearToken();
-    accessToken = null;
-    tokenClient.requestAccessToken({ prompt: '' });
-    throw new Error('登入已過期，請重新授權後再試。');
+    if (accessToken) {
+      onLoggedOut();
+      showError('loginError', '登入已過期，請按上方按鈕重新登入，再重新查詢並上傳這支手機。');
+    }
+    throw new Error('登入已過期');
   }
 
   return resp;
